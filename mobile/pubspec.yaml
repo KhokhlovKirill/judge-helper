@@ -1,0 +1,28 @@
+name: judge_helper
+description: Мобильное приложение судейской бригады.
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: ^3.12.2
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+  firebase_core: ^4.0.0
+  firebase_messaging: ^16.0.0
+  sqflite: ^2.4.2
+  flutter_secure_storage: ^10.0.0
+  url_launcher: ^6.3.2
+  file_picker: ^10.3.10
+  path_provider: ^2.1.5
+  open_filex: ^4.7.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  sqflite_common_ffi: 2.3.6
+  sqlite3: ^2.9.4
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true

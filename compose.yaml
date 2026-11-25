@@ -1,0 +1,65 @@
+x-api: &api
+  build: .
+  environment: &settings
+    DATABASE_URL: postgresql+psycopg://judge:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db/judge
+    SMTP_HOST: mail
+    PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8000}
+    YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:-}
+    YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:-}
+  depends_on:
+    db:
+      condition: service_healthy
+services:
+  db:
+    image: postgres:17
+    environment: &database
+      POSTGRES_DB: judge
+      POSTGRES_USER: judge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: [data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U judge"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    <<: *api
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  delivery:
+    <<: *api
+    command: ["python","-m","server.delivery"]
+    depends_on:
+      api:
+        condition: service_healthy
+  mail:
+    image: axllent/mailpit:v1.27
+    ports: ["127.0.0.1:8025:8025"]
+  backup:
+    image: postgres:17
+    environment:
+      PGHOST: db
+      PGUSER: judge
+      PGDATABASE: judge
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes: ["./ci/backup.sh:/backup.sh:ro","./backups:/backups"]
+    command: ["sh","-ec","while true; do sh /backup.sh /backups; sleep 86400; done"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+  tls:
+    image: caddy:2
+    profiles: [tls]
+    environment:
+      SITE_HOST: ${SITE_HOST:-localhost}
+    ports: ["443:443","80:80"]
+    volumes: ["./ci/Caddyfile:/etc/caddy/Caddyfile:ro","certificates:/data"]
+    depends_on: [api]
+volumes:
+  data:
+  certificates:

@@ -1,0 +1,197 @@
+name: Judge Helper acceptance
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: judge_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:fixture@localhost:5432/judge_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: |
+          mkdir -p artifacts
+          ruff check server tests ci
+          python -m ci.matrix
+          python -m pytest -q --cov=server --cov-branch --cov-report=xml:artifacts/coverage.xml --cov-report=json:artifacts/coverage.json --junitxml=artifacts/server.xml
+          python -m ci.coverage_gate server
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-tests
+          path: artifacts
+  flutter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with: {flutter: 'true'}
+      - working-directory: mobile
+        run: |
+          flutter analyze --no-pub
+          mkdir -p ../artifacts
+          flutter test --no-pub --coverage --branch-coverage --file-reporter json:../artifacts/flutter.json
+          cp coverage/lcov.info ../artifacts/
+      - run: python -m ci.coverage_gate flutter
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flutter-tests
+          path: artifacts
+  infrastructure:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      db:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: judge_load
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 15
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:fixture@localhost:5432/judge_load
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: fixture
+      PGDATABASE: judge_load
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: bash ci/start-server.sh
+      - run: python -m ci.load
+      - if: always()
+        env:
+          DB_CONTAINER: ${{ job.services.db.id }}
+        run: bash ci/restore-test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: infrastructure, path: artifacts}
+  android:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {api: 28, profile: pixel_2, form: phone}
+          - {api: 35, profile: pixel_c, form: tablet}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: ./.github/actions/setup
+        with: {flutter: 'true'}
+      - run: |
+          python -m ci.seed
+          bash ci/start-server.sh
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - working-directory: mobile
+        run: flutter build apk --debug --no-pub
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: ${{ matrix.profile }}
+          script: bash ci/android-test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-${{ matrix.form }}-api${{ matrix.api }}
+          path: |
+            artifacts
+            mobile/build/app/outputs/flutter-apk/app-debug.apk
+  ios:
+    if: github.event_name != 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        form: [iPhone, iPad]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with: {flutter: 'true'}
+      - run: |
+          python -m ci.seed
+          bash ci/start-server.sh
+          bash ci/ios-test.sh "${{ matrix.form }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-${{ matrix.form }}
+          path: artifacts
+  self-healing:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check OpenRouter configuration
+        env:
+          KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MODEL: ${{ vars.OPENROUTER_MODEL }}
+        run: |
+          test -n "$KEY" || { echo "::error::Missing OPENROUTER_API_KEY secret"; exit 1; }
+          test -n "$MODEL" || { echo "::error::Missing OPENROUTER_MODEL variable"; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: ./.github/actions/setup
+        with: {flutter: 'true'}
+      - run: |
+          npm install --global appium@3.1.2
+          appium driver install uiautomator2@6.3.0
+          python -m ci.seed --prefix heal --participants 3
+          bash ci/start-server.sh ci.fault_app:app
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          cd mobile && flutter build apk --debug --no-pub
+      - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          APK: mobile/build/app/outputs/flutter-apk/app-debug.apk
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: bash ci/heal-test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: self-healing, path: artifacts}
+  report:
+    if: always()
+    needs: [server, flutter, android, ios, infrastructure, self-healing]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {path: evidence}
+      - name: Acceptance report
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: python3 -m ci.report
