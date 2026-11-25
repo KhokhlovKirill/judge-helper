@@ -38,6 +38,8 @@ events = table(
     col("data", sa.JSON),
     col("revision", sa.Integer),
 )
+rosters = table("rosters", col("id", primary_key=True), col("participants", sa.JSON))
+
 documents = table("documents", col("id", primary_key=True), col("pdf", sa.LargeBinary))
 outbox = table(
     "outbox",
@@ -104,3 +106,18 @@ def enqueue(db, kind, recipient, data):
 
 
 devices = table("devices", col("token", primary_key=True), col("email"))
+
+
+def create_event(db, event):
+    people = event["participants"]
+    compact = event | {"participants": list(people)}
+    db.execute(events.insert().values(id=event["id"], data=compact, revision=1))
+    db.execute(rosters.insert().values(id=event["id"], participants=people))
+
+
+def hydrate(db, event):
+    if isinstance(event["participants"], list):
+        event["participants"] = db.scalar(
+            sa.select(rosters.c.participants).where(rosters.c.id == event["id"])
+        )
+    return event

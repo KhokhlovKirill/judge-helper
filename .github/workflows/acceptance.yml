@@ -106,14 +106,14 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - working-directory: mobile
-        run: flutter build apk --debug --no-pub
+        run: bash ../ci/diagnose.sh flutter build apk --debug --no-pub
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
           target: google_apis
           profile: ${{ matrix.profile }}
-          script: bash ci/android-test.sh
+          script: bash ci/diagnose.sh bash ci/android-test.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -136,7 +136,7 @@ jobs:
       - run: |
           python -m ci.seed
           bash ci/start-server.sh
-          bash ci/ios-test.sh "${{ matrix.form }}"
+          bash ci/diagnose.sh bash ci/ios-test.sh "${{ matrix.form }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -169,7 +169,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          cd mobile && flutter build apk --debug --no-pub
+          cd mobile && flutter build apk --debug --no-pub --dart-define=DEMO_RENAMED_BUTTON=true
       - uses: reactivecircus/android-emulator-runner@v2
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

@@ -73,7 +73,7 @@ def run():
                 driver.hide_keyboard()
             label("Сохранить").click()
             label("Отправить оценку")
-            original = "score_confirm" if mode == "baseline" else "submit_score_legacy"
+            original = "score_confirm"
             matches = driver.find_elements(
                 AppiumBy.XPATH,
                 f"//*[@resource-id='{original}' or substring-after(@resource-id,':id/')='{original}']",

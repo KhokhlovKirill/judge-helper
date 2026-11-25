@@ -327,16 +327,33 @@ def setup(db, body):
     return data | {"judges": judges, "chief": chief}
 
 
-def load(db, eid, user, lock=False):
+def load(db, eid, user, lock=False, full=True):
     query = sa.select(S.events).where(S.events.c.id == eid)
     record = db.execute(query.with_for_update() if lock else query).mappings().first()
     require(record, "Соревнование не найдено", 404)
     event = record["data"]
     require(user in event["judges"] or user == event["owner"], "Нет доступа", 403)
-    return event
+    return S.hydrate(db, event) if full else event
 
 
-def save(db, event):
+def save(db, event, roster_changed=False):
+    if roster_changed:
+        changed = db.execute(
+            S.rosters.update()
+            .where(S.rosters.c.id == event["id"])
+            .values(participants=event["participants"])
+        )
+        if not changed.rowcount:
+            db.execute(
+                S.rosters.insert().values(
+                    id=event["id"], participants=event["participants"]
+                )
+            )
+    if isinstance(event["participants"], dict) and (
+        roster_changed
+        or db.scalar(sa.select(S.rosters.c.id).where(S.rosters.c.id == event["id"]))
+    ):
+        event = event | {"participants": list(event["participants"])}
     db.execute(
         S.events.update()
         .where(S.events.c.id == event["id"])
@@ -350,14 +367,24 @@ def editable(event, user):
 
 
 def notify(db, event, kind, recipients):
-    for recipient in recipients:
-        if get_user(db, recipient)["preferences"].get(kind, True):
-            S.enqueue(
-                db,
-                "push",
-                recipient,
-                dict(event=event["id"], kind=kind, title=event["title"]),
-            )
+    preferences = db.execute(
+        sa.select(S.users.c.email, S.users.c.preferences).where(
+            S.users.c.email.in_(recipients)
+        )
+    )
+    rows = [
+        dict(
+            id=str(uuid4()),
+            kind="push",
+            recipient=who,
+            data=dict(event=event["id"], kind=kind, title=event["title"]),
+            sent=False,
+        )
+        for who, prefs in preferences
+        if prefs.get(kind, True)
+    ]
+    if rows:
+        db.execute(S.outbox.insert(), rows)
 
 
 @app.post("/events")
@@ -373,7 +400,7 @@ def create(body: Competition, db: DB, user: Actor):
         audit=[],
         operations={},
     )
-    db.execute(S.events.insert().values(id=event["id"], data=event, revision=1))
+    S.create_event(db, event)
     notify(db, event, "assigned", event["judges"])
     return {"id": event["id"]}
 
@@ -396,7 +423,7 @@ def edit(eid: str, body: Competition, db: DB, user: Actor):
     e.update(data)
     for p in e["participants"].values():
         p["category"] = category(p["birth"], e["date"], e["boundaries"])
-    save(db, e)
+    save(db, e, roster_changed=True)
     notify(db, e, "assigned", new)
     return {"id": eid}
 
@@ -423,10 +450,14 @@ def detail(eid: str, db: DB, user: Actor):
         n: {j: p for j, p in req.items() if actor in (j, e["chief"])}
         for n, req in e["corrections"].items()
     }
-    data["audit"] = [a for a in e["audit"] if actor in (a["judge"], e["chief"])]
+    data["audit"] = [
+        a
+        for a in e["audit"]
+        if actor in (a["judge"], e["chief"]) and actor in e["scores"][a["number"]]
+    ]
     data["results"] = results(e, actor)
     data["charts"] = charts(e, data["results"])
-    return data
+    return JSONResponse(data)
 
 
 def insert_person(e, p, original=None):
@@ -458,7 +489,7 @@ def participant(
     e = load(db, eid, user["email"], True)
     editable(e, user["email"])
     insert_person(e, body, original)
-    save(db, e)
+    save(db, e, roster_changed=True)
     return {"number": body.number}
 
 
@@ -480,20 +511,25 @@ async def excel(eid: str, request: Request, db: DB, user: Actor, confirm: bool =
     except (ValueError, BadZipFile, KeyError) as exc:
         raise RuleError("Ошибка Excel: " + str(exc)) from exc
     if confirm:
-        save(db, e)
+        save(db, e, roster_changed=True)
     return {"valid": valid, "errors": errors}
 
 
 @app.post("/events/{eid}/scores/{number}")
-def score(eid: str, number: str, body: Score, db: DB, user: Actor):
-    e = load(db, eid, user["email"], True)
-    version, completed = submit(
-        e, user["email"], number, body.model_dump(mode="json"), S.now()
-    )
-    save(db, e)
-    if completed:
-        notify(db, e, "scored", e["judges"])
-    return {"version": version}
+def score(eid: str, number: str, body: Score, authorization: Annotated[str, Header()]):
+    # Release the competition row lock in the same worker that acquires it.
+    with S.transaction() as db:
+        user = actor(db, authorization)
+        e = load(db, eid, user["email"], True, full=False)
+        replay = str(body.operation) in e["operations"]
+        version, completed = submit(
+            e, user["email"], number, body.model_dump(mode="json"), S.now()
+        )
+        if not replay:
+            save(db, e)
+        if completed:
+            notify(db, e, "scored", e["judges"])
+        return {"version": version}
 
 
 @app.post("/events/{eid}/corrections/{number}")

@@ -39,10 +39,14 @@ class _HomeState extends State<Home> {
   List events = [];
   bool busy = false;
   String error = '';
+  Timer? backgroundSync;
   Client get c => widget.client;
   @override
   void initState() {
     super.initState();
+    backgroundSync = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (c.email.isNotEmpty) unawaited(c.sync());
+    });
     if (c.email.isNotEmpty) {
       run(() async {
         await refresh();
@@ -53,6 +57,7 @@ class _HomeState extends State<Home> {
 
   @override
   void dispose() {
+    backgroundSync?.cancel();
     address.dispose();
     password.dispose();
     super.dispose();

@@ -226,3 +226,21 @@ def test_concurrent_reconnect(api, contest):
         )
     assert api.post(path + "/scores/1", headers=chief, json=score()).status_code == 409
     assert len(api.get(path, headers=chief).json()["scores"]["1"]) == 1
+
+
+def test_chief_audit_before_own_score(api, contest):
+    path, org, chief, judge = contest
+    api.post(path + "/actions/start", headers=org).raise_for_status()
+    api.post(path + "/scores/1", headers=judge, json=score()).raise_for_status()
+    api.post(
+        path + "/corrections/1", headers=judge, json={"reason": "Проверка"}
+    ).raise_for_status()
+    api.post(
+        path + "/corrections/1",
+        headers=chief,
+        json={"judge": "judge@example.test", "approve": True},
+    ).raise_for_status()
+    api.post(path + "/scores/1", headers=judge, json=score(7, 8, 1)).raise_for_status()
+    assert api.get(path, headers=chief).json()["audit"] == []
+    api.post(path + "/scores/1", headers=chief, json=score()).raise_for_status()
+    assert len(api.get(path, headers=chief).json()["audit"]) == 1

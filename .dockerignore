@@ -2,3 +2,5 @@
 !server/
 !server/*.py
 !requirements.txt
+!server/DejaVuSans.ttf
+!server/DejaVu-LICENSE.txt

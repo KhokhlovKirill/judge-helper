@@ -60,7 +60,12 @@ def protocol(event, rows, names):
 
     out = BytesIO()
     story = [
-        Paragraph("Протокол соревнования", ParagraphStyle("Title",parent=style,fontSize=18,leading=24,spaceAfter=6)),
+        Paragraph(
+            "Протокол соревнования",
+            ParagraphStyle(
+                "Title", parent=style, fontSize=18, leading=24, spaceAfter=6
+            ),
+        ),
         line(event["title"]),
         line(event["date"] + " · " + event["venue"]),
         line("Судейская бригада: " + ", ".join(names[j] for j in event["judges"])),
@@ -107,5 +112,7 @@ def protocol(event, rows, names):
             line(event.get("approved_at") or "Черновик"),
         ]
     )
-    SimpleDocTemplate(out, leftMargin=55, rightMargin=55, topMargin=48, bottomMargin=48).build(story)
+    SimpleDocTemplate(
+        out, leftMargin=55, rightMargin=55, topMargin=48, bottomMargin=48
+    ).build(story)
     return out.getvalue()

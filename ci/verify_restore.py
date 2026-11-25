@@ -1,6 +1,7 @@
 import hashlib
 import os
 from sqlalchemy import create_engine, select
+from sqlalchemy.engine import make_url
 from server import store as S
 
 
@@ -22,7 +23,7 @@ def fingerprints(url):
 if __name__ == "__main__":
     original = fingerprints(os.environ["DATABASE_URL"])
     restored = fingerprints(
-        os.environ["DATABASE_URL"].rsplit("/", 1)[0] + "/judge_restored"
+        make_url(os.environ["DATABASE_URL"]).set(database="judge_restored")
     )
     assert original["events"][0] > 0 and original == restored
     print("Restored all tables successfully", original)

@@ -78,6 +78,7 @@ class Client with ScoreQueue {
         : jsonDecode(utf8.decode(response.bodyBytes));
   }
 
+  DateTime? lastSync;
   Future<dynamic> cached(String path) async {
     final owner = email;
     try {
@@ -88,6 +89,7 @@ class Client with ScoreQueue {
         'value': jsonEncode(value),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
       offline = false;
+      lastSync = DateTime.now();
       return value;
     } on ApiError {
       rethrow;

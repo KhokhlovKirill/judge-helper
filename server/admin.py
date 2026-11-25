@@ -1,7 +1,7 @@
 import argparse
 import getpass
 import os
-from .api import bootstrap
+from .api import bootstrap, save
 from . import store as S
 from sqlalchemy import select
 
@@ -15,15 +15,13 @@ def anonymize(event_id, number):
             raise ValueError(
                 "Утверждённый документ требует отдельного решения о сроке хранения"
             )
+        S.hydrate(db, event)
         p = event["participants"][number]
         p.update(
             name=number, surname="Участник", club="—", comment="", birth=event["date"]
         )
-        db.execute(
-            S.events.update()
-            .where(S.events.c.id == event_id)
-            .values(data=event, revision=S.events.c.revision + 1)
-        )
+        event["draft_protocol"] = False
+        save(db, event, roster_changed=True)
         db.execute(S.documents.delete().where(S.documents.c.id == event_id))
 
 

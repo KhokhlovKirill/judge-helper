@@ -328,7 +328,10 @@ class _CompetitionPageState extends State<CompetitionPage> {
             child: const Text('Отмена'),
           ),
           Semantics(
-            identifier: 'score_confirm',
+            identifier:
+                const bool.fromEnvironment('DEMO_RENAMED_BUTTON') && n != '1'
+                ? 'confirm_marks'
+                : 'score_confirm',
             child: FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Отправить оценку'),
@@ -410,6 +413,12 @@ class _CompetitionPageState extends State<CompetitionPage> {
                     ? 'Без сети · в очереди ${queue.length}'
                     : 'На связи · в очереди ${queue.length}',
               ),
+              if (c.lastSync != null)
+                Text(
+                  'Синхронизация ${TimeOfDay.fromDateTime(c.lastSync!).format(context)}',
+                ),
+              if (e['next'] != null && e['state'] == 'active')
+                Text("Вызван участник №${e['next']}"),
               if (tab == 0) ...[
                 Wrap(
                   spacing: 8,
@@ -479,6 +488,19 @@ class _CompetitionPageState extends State<CompetitionPage> {
                           },
                         ),
               ],
+              if (tab == 0 && (e['audit'] as List).isNotEmpty)
+                ExpansionTile(
+                  title: const Text('История исправлений'),
+                  children: [
+                    for (final a in e['audit'])
+                      ListTile(
+                        title: Text("№${a['number']} · ${a['judge']}"),
+                        subtitle: Text(
+                          "${a['old']['t'] / 10} / ${a['old']['a'] / 10} → ${a['new'][0] / 10} / ${a['new'][1] / 10}\n${a['reason']} · ${a['time']}",
+                        ),
+                      ),
+                  ],
+                ),
               if (tab == 1) ...resultWidgets(e),
               if (tab == 2)
                 Wrap(

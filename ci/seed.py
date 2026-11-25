@@ -56,7 +56,7 @@ def seed(prefix="mobile", participants=1, judges=1):
                     for j in panel[1:]
                 ],
             )
-        db.execute(S.events.insert().values(id=event_id, data=event, revision=1))
+        S.create_event(db, event)
     return event_id, panel
 
 
