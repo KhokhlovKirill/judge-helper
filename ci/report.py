@@ -40,6 +40,9 @@ def main():
     ]:
         statuses = [result(c) for c in checks]
         status = next((v for v in ("Failed", "Not run") if v in statuses), "Passed")
+        if key == "JUDGE-44" and jobs.get("ios") == "skipped":
+            android = jobs.get("android", "skipped")
+            status = f"Android: {android} · iOS: Not run"
         text.append(
             f"| {key} · {title} | {', '.join(c[2] for c in checks)} | {status} |"
         )
@@ -58,6 +61,8 @@ def main():
         if os.environ["GITHUB_EVENT_NAME"] != "pull_request"
         else ("server", "flutter")
     )
+    if os.environ.get("RUN_IOS") != "true":
+        expected = set(expected) - {"ios"}
     assert all(jobs[k] == "success" for k in expected), jobs
 
 
